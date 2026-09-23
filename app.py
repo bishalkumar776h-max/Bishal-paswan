@@ -107,7 +107,7 @@ def get_account_credentials(region: str) -> str:
     r = region.upper()
 
     credentials = {
-        "IND": "uid=4779207480&password=MOHIT_MOHIT_wPrbqHX3",
+        "IND": "uid=4276222452&password=Drax123_FJMGE_BY_SPIDEERIO_GAMING_94N8O",
         "BR": "uid=4519662843&password=BUNNYXPRIMEFF6ZR7G",
         "US": "uid=4519662843&password=BUNNYXPRIMEFF6ZR7G",
         "SAC": "uid=4519662843&password=BUNNYXPRIMEFF6ZR7G",
