@@ -1,6 +1,6 @@
 # bishalpaswanbot CORE ON TOP BABY !!!
 # AUTO-REGION FINDER INFO API
-# FULLY FIXED FOR ALL PLATFORMS
+# FULLY FIXED FOR RAILWAY / RENDER
 # NO API KEY REQUIRED
 # JOIN @bishalpaswanbot FOR MORE LEAKS
 
@@ -11,7 +11,6 @@ import json
 import random
 import threading
 import os
-import sys
 import base64
 from collections import defaultdict
 from functools import wraps
@@ -39,10 +38,9 @@ SUPPORTED_REGIONS = [
     "RU", "TH", "TW", "BD", "PK", "ME", "CIS", "EUROPE"
 ]
 
-# ---------- JWT API (NEW) ----------
+# ---------- JWT API ----------
 JWT_API_URL = "https://bishal-jwt-api.vercel.app/token"
 
-# Region -> server URL mapping (JWT API server URL nahi deti)
 REGION_SERVER_URLS = {
     "IND":    "https://client.ind.freefiremobile.com",
     "BD":     "https://clientbp.ppmainecoonghj.com",
@@ -69,8 +67,9 @@ cache = TTLCache(maxsize=200, ttl=600)
 uid_region_cache = TTLCache(maxsize=200, ttl=3600)
 cached_tokens = defaultdict(dict)
 
-# Shared HTTP client (perf fix)
+# Shared HTTP client
 _http: Optional[httpx.AsyncClient] = None
+
 def http() -> httpx.AsyncClient:
     global _http
     if _http is None:
@@ -80,7 +79,7 @@ def http() -> httpx.AsyncClient:
         )
     return _http
 
-# ---------- Helper Functions ------------
+# ---------- Helper Functions ----------
 def pad(text: bytes) -> bytes:
     padding_length = AES.block_size - (len(text) % AES.block_size)
     return text + bytes([padding_length] * padding_length)
@@ -102,7 +101,7 @@ async def json_to_proto(json_data: str, proto_message: Message) -> bytes:
     json_format.ParseDict(json.loads(json_data), proto_message)
     return proto_message.SerializeToString()
 
-# ---------- Guest IDS (UNCHANGED) --------------
+# ---------- Guest IDS ----------
 def get_account_credentials(region: str) -> str:
     r = region.upper()
 
@@ -128,7 +127,6 @@ def get_account_credentials(region: str) -> str:
     if r in credentials:
         return credentials[r]
 
-    # Fallback to file
     try:
         with open("ucguest.txt", "r") as f:
             lines = [line.strip() for line in f if line.strip()]
@@ -141,7 +139,6 @@ def get_account_credentials(region: str) -> str:
         return "uid=4587290647&password=BUNNY_FLASH_SBQ8W"
 
 def _parse_uid_pw(region: str) -> Tuple[Optional[str], Optional[str]]:
-    """'uid=X&password=Y' -> ('X', 'Y')"""
     raw = get_account_credentials(region)
     try:
         parts = dict(p.split("=", 1) for p in raw.split("&"))
@@ -149,9 +146,8 @@ def _parse_uid_pw(region: str) -> Tuple[Optional[str], Optional[str]]:
     except Exception:
         return None, None
 
-# ---------- JWT payload helpers (NEW) ----------
+# ---------- JWT payload helpers ----------
 def _region_from_jwt(tok: str) -> Optional[str]:
-    """Decode JWT payload (no verify) and read lock_region."""
     try:
         parts = tok.split(".")
         if len(parts) < 2:
@@ -162,7 +158,7 @@ def _region_from_jwt(tok: str) -> Optional[str]:
     except Exception:
         return None
 
-# ---------- JWT API call (NEW) ----------
+# ---------- JWT API call ----------
 async def get_jwt_token_from_api(region: str) -> Optional[dict]:
     uid, pw = _parse_uid_pw(region)
     if not uid or not pw or pw == "ADD_HERE":
@@ -187,7 +183,6 @@ async def get_jwt_token_from_api(region: str) -> Optional[dict]:
         logger.error(f"[JWT] {region} no 'token' in response: {data}")
         return None
 
-    # Region: JWT payload se, warna requested region
     api_region = _region_from_jwt(tok) or region
     server_url = REGION_SERVER_URLS.get(api_region, "https://clientbp.ppmainecoonghj.com")
 
@@ -198,7 +193,7 @@ async def get_jwt_token_from_api(region: str) -> Optional[dict]:
         "expires_at": time.time() + 25200,
     }
 
-# -------------- Token Generation (MajorLogin fallback) --------------
+# ---------- Token Generation (MajorLogin fallback) ----------
 async def get_access_token(account: str, timeout: int = 15):
     url = "https://ffmconnect.live.gop.garenanow.com/oauth/guest/token/grant"
     payload = f"{account}&response_type=token&client_type=2&client_secret=2ee44819e9b4598845141067b281621874d0d5d7af9d8f7e00c1e54715b7d1e3&client_id=100067"
@@ -221,7 +216,6 @@ async def get_access_token(account: str, timeout: int = 15):
         return "0", "0"
 
 async def create_jwt(region: str):
-    """MajorLogin fallback (purana tarika)."""
     try:
         account = get_account_credentials(region)
         token_val, open_id = await get_access_token(account)
@@ -270,6 +264,216 @@ async def create_jwt(region: str):
             'token': f"Bearer {msg.get('token','0')}",
             'region': msg.get('lockRegion','0'),
             'server_url': msg.get('serverUrl','0'),
+            'expires_at': time.time() + 25200
+        }
+
+        logger.info(f"✅ MajorLogin Token OK [{region}]")
+    except Exception as e:
+        logger.error(f"Error creating JWT for {region}: {e}")
+
+# ---------- Token flow ----------
+async def get_token_info(region: str) -> Tuple[str, str, str]:
+    info = cached_tokens.get(region)
+    if info and time.time() < info.get('expires_at', 0):
+        return info['token'], info['region'], info['server_url']
+
+    info = await get_jwt_token_from_api(region)
+
+    if not info:
+        await create_jwt(region)
+        info = cached_tokens.get(region)
+
+    if not info:
+        raise RuntimeError(f"No token available for {region}")
+
+    cached_tokens[region] = info
+    return info['token'], info['region'], info['server_url']
+
+async def initialize_tokens():
+    logger.info("Initializing tokens for all regions...")
+    tasks = [get_token_info(r) for r in SUPPORTED_REGIONS]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    for region, res in zip(SUPPORTED_REGIONS, results):
+        if isinstance(res, Exception):
+            logger.error(f"[startup] {region}: {res}")
+
+# ---------- Lazy token init (Railway-safe) ----------
+_init_lock = threading.Lock()
+_initialized = False
+
+def _run_async(coro):
+    """Run an async coroutine safely whether or not a loop is running."""
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # We are in a running loop (e.g. gunicorn worker w/ gevent) -> new loop in thread
+            result_container = {}
+            def runner():
+                new_loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(new_loop)
+                try:
+                    result_container['result'] = new_loop.run_until_complete(coro)
+                finally:
+                    new_loop.close()
+            t = threading.Thread(target=runner)
+            t.start()
+            t.join()
+            return result_container.get('result')
+        else:
+            return loop.run_until_complete(coro)
+    except RuntimeError:
+        new_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(new_loop)
+        return new_loop.run_until_complete(coro)
+
+def ensure_tokens_initialized():
+    global _initialized
+    if _initialized:
+        return
+    with _init_lock:
+        if _initialized:
+            return
+        try:
+            _run_async(initialize_tokens())
+        except Exception as e:
+            logger.error(f"Token init error: {e}")
+        _initialized = True
+
+@app.before_request
+def _bootstrap():
+    ensure_tokens_initialized()
+
+# ---------- Get Account Information ----------
+async def GetAccountInformation(uid, unk, region, endpoint):
+    try:
+        payload = await json_to_proto(
+            json.dumps({'a': uid, 'b': unk}),
+            main_pb2.GetPlayerPersonalShow()
+        )
+
+        data_enc = aes_cbc_encrypt(MAIN_KEY, MAIN_IV, payload)
+        token, lock, server = await get_token_info(region)
+
+        headers = {
+            'User-Agent': USERAGENT,
+            'Connection': "Keep-Alive",
+            'Accept-Encoding': "gzip",
+            'Content-Type': "application/octet-stream",
+            'Expect': "100-continue",
+            'Authorization': token,
+            'X-Unity-Version': "2018.4.11f1",
+            'X-GA': "v1 1",
+            'ReleaseVersion': RELEASEVERSION
+        }
+
+        r = await http().post(server + endpoint, data=data_enc, headers=headers)
+
+        if r.status_code != 200:
+            logger.error(f"Account info failed: {r.status_code} region={region}")
+            return None
+        if "text/" in r.headers.get("content-type", ""):
+            return None
+
+        decoded = decode_protobuf(r.content, AccountPersonalShow_pb2.AccountPersonalShowInfo)
+        if not decoded:
+            return None
+
+        return json.loads(json_format.MessageToJson(decoded))
+    except Exception as e:
+        logger.error(f"GetAccountInformation error: {e}")
+        return None
+
+# ---------- Cache Decorator ----------
+def cached_endpoint(ttl=300):
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(*a, **k):
+            key = (request.path, tuple(request.args.items()))
+            if key in cache:
+                return cache[key]
+            res = fn(*a, **k)
+            cache[key] = res
+            return res
+        return wrapper
+    return decorator
+
+# ---------- Routes ----------
+@app.route('/bmw', methods=['GET'])
+@cached_endpoint()
+def get_account_info():
+    uid = request.args.get('uid')
+
+    if not uid:
+        return jsonify({"error": "Please provide UID. Usage: /bmw?uid=123456789"}), 400
+
+    if uid in uid_region_cache:
+        try:
+            data = _run_async(
+                GetAccountInformation(uid, "7", uid_region_cache[uid], "/GetPlayerPersonalShow")
+            )
+            if data:
+                return jsonify(data)
+        except Exception as e:
+            logger.error(f"Cached region failed: {e}")
+
+    for region in SUPPORTED_REGIONS:
+        try:
+            data = _run_async(
+                GetAccountInformation(uid, "7", region, "/GetPlayerPersonalShow")
+            )
+            if data:
+                uid_region_cache[uid] = region
+                return jsonify(data)
+        except Exception as e:
+            logger.debug(f"Region {region} failed for UID {uid}: {e}")
+            continue
+
+    return jsonify({"error": "UID not found or account doesn't exist"}), 404
+
+@app.route('/health', methods=['GET'])
+def health_check():
+    return jsonify({
+        "status": "active",
+        "regions": len(SUPPORTED_REGIONS),
+        "cached_tokens": len(cached_tokens),
+        "cache_size": len(cache),
+        "initialized": _initialized
+    }), 200
+
+@app.route('/refresh-tokens', methods=['GET', 'POST'])
+def refresh_tokens_endpoint():
+    try:
+        _run_async(initialize_tokens())
+        return jsonify({'message': 'Tokens refreshed successfully'}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/', methods=['GET'])
+def home():
+    return jsonify({
+        "name": "FreeFire Auto-Region Finder API",
+        "version": "2.2",
+        "endpoints": {
+            "/bmw": "Get account info - Usage: /bmw?uid=123456789",
+            "/health": "Health check",
+            "/refresh-tokens": "Force refresh tokens"
+        },
+        "status": "running"
+    }), 200
+
+# ---------- Error Handlers ----------
+@app.errorhandler(404)
+def not_found(error):
+    return jsonify({"error": "Endpoint not found"}), 404
+
+@app.errorhandler(500)
+def internal_error(error):
+    return jsonify({"error": "Internal server error"}), 500
+
+# ---------- Main ----------
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False, threaded=True)msg.get('serverUrl','0'),
             'expires_at': time.time() + 25200
         }
 
